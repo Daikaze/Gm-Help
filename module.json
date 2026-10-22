@@ -1,8 +1,8 @@
 {
   "id": "gm-help",
   "title": "GM Help",
-  "description": "Private GM encyclopedia with isolated UI and GM-restricted world compendium storage. Fixes Monk's journal interference and global Foundry color changes.",
-  "version": "0.2.1",
+  "description": "GM-only encyclopedia for Foundry v14: Obsidian private ZIP import, session tracker and left-side scene control icon.",
+  "version": "0.3.0",
   "authors": [
     {
       "name": "Daikaze"

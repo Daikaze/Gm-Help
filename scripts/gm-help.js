@@ -1,4 +1,6 @@
 import { AVERIS_SEED } from "./averis-data.js";
+import { renderObsidianMarkdown } from "./obsidian-render.js";
+import { readAverisZip, uploadAverisImages } from "./obsidian-import.js";
 import { loadArchive, registerLegacySetting, legacyWorldRecords, clearLegacySetting, documents, getRecord, createRecord, legacyDocuments } from "./storage.js";
 
 const MODULE_ID = "gm-help";
@@ -11,6 +13,11 @@ const TYPES = {
   event: ["Events", "fa-calendar-days"],
   lore: ["World Lore", "fa-book"],
   item: ["Important Items", "fa-gem"],
+  session: ["Sessions", "fa-calendar-check"],
+  character: ["Characters", "fa-users-viewfinder"],
+  mechanic: ["Mechanics", "fa-gears"],
+  creature: ["Creatures", "fa-dragon"],
+  deity: ["Deities", "fa-sun"],
   other: ["Other", "fa-folder"]
 };
 const COMMON_FIELDS = [
@@ -28,6 +35,17 @@ const TYPE_FIELDS = {
   event: [["date", "In-world date"], ["participants", "Participants", true]],
   lore: [["era", "Era / date"], ["sources", "Sources", true]],
   item: [["rarity", "Rarity"], ["owner", "Owner"], ["properties", "Properties", true]],
+  session: [
+    ["sessionNumber", "Session number"],
+    ["sessionEnd", "Session end (for grouped sessions)"],
+    ["sessionDate", "In-game / real date"],
+    ["sessionStatus", "Session status"],
+    ["sessionHighlights", "Highlights / next steps", true]
+  ],
+  character: [["species", "Race"], ["occupation", "Class / profession"], ["history", "Backstory", true]],
+  mechanic: [["sourcePath", "Original Obsidian path"]],
+  creature: [["species", "Species"], ["status", "Status"], ["features", "Abilities", true]],
+  deity: [["region", "Domain"], ["history", "Lore", true]],
   other: []
 };
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({
@@ -50,14 +68,18 @@ function cleanRecord(raw) {
   const type = safeType(raw?.type);
   const result = {
     type, tags: "", summary: "", description: "", secrets: "", image: "",
-    uuid: "", related: [], key: ""
+    uuid: "", related: [], key: "", body: "", sourcePath: "", sourceTitle: "", links: [], media: {}
   };
   for (const key of ["type", "tags", "summary", "description", "secrets", "image",
-    "uuid", "key", ...COMMON_FIELDS.map((f) => f[0]), ...Object.values(TYPE_FIELDS).flat().map((f) => f[0])]) {
+    "uuid", "key", "body", "sourcePath", "sourceTitle", ...COMMON_FIELDS.map((f) => f[0]), ...Object.values(TYPE_FIELDS).flat().map((f) => f[0])]) {
     if (key === "type") continue;
     if (typeof raw?.[key] === "string") result[key] = raw[key].slice(0, 50000);
   }
-  result.related = Array.isArray(raw?.related) ? raw.related.filter((v) => typeof v === "string").slice(0, 100) : [];
+  result.related = Array.isArray(raw?.related) ? raw.related.filter(v => typeof v === "string").slice(0, 100) : [];
+  result.links = Array.isArray(raw?.links) ? raw.links.filter(v => typeof v === "string").slice(0, 300) : [];
+  result.media = Object.fromEntries(Object.entries(raw?.media && typeof raw.media === "object" ? raw.media : {})
+    .filter(([k,v]) => typeof k === "string" && typeof v === "string")
+    .slice(0, 200));
   return result;
 }
 
@@ -77,6 +99,7 @@ class GMHelpApp extends foundry.applications.api.ApplicationV2 {
     this.search = "";
     this.selectedId = null;
     this.mode = "view";
+    this.sessionFilter = "all";
   }
 
   get currentDoc() { return this.selectedId ? documents().find((doc) => doc.id === this.selectedId) || null : null; }
@@ -92,6 +115,7 @@ class GMHelpApp extends foundry.applications.api.ApplicationV2 {
       '<div class="gmh-actions">',
       '<button type="button" data-gmh-action="seed" title="Import the built-in Averis lore (skips existing records)">' + icon("fa-wand-magic-sparkles") + ' Averis Starter</button>',
       '<button type="button" data-gmh-action="import">' + icon("fa-file-import") + ' Import</button>',
+      '<button type="button" data-gmh-action="obsidian" title="Import the prepared private Obsidian ZIP">' + icon("fa-box-archive") + ' Obsidian ZIP</button>',
       '<button type="button" data-gmh-action="export">' + icon("fa-file-export") + ' Backup</button>',
       ...(legacyWorldRecords().length ? [
         '<button type="button" data-action="recover-world" title="Recover any entries saved during v0.2.0">' + icon("fa-rotate-left") + ' Recover v0.2 Notes</button>'
@@ -105,10 +129,12 @@ class GMHelpApp extends foundry.applications.api.ApplicationV2 {
       '<div class="gmh-main">',
       '<aside class="gmh-sidebar"><div class="gmh-search">' + icon("fa-magnifying-glass") + '<input class="gmh-search-input" aria-label="Search archive" placeholder="Search names, notes, tags…" value="' + esc(this.search) + '"></div>',
       '<nav class="gmh-types">' + this.typeButtons() + '</nav>',
+      '<div class="gmh-session-filters">' + this.sessionFiltersHTML() + '</div>',
       '<div class="gmh-list-heading"><strong>Entries</strong><span class="gmh-result-count"></span></div>',
       '<div class="gmh-items">' + this.listHTML() + '</div></aside>',
       '<main class="gmh-detail">' + this.detailHTML() + '</main></div>',
-      '<input class="gmh-import-file" type="file" accept=".json,application/json" hidden>'
+      '<input class="gmh-import-file" type="file" accept=".json,application/json" hidden>',
+      '<input class="gmh-obsidian-file" type="file" accept=".zip,application/zip" hidden>'
     ].join("");
     return root;
   }
@@ -127,6 +153,11 @@ class GMHelpApp extends foundry.applications.api.ApplicationV2 {
     });
     root.addEventListener("change", (event) => {
       if (event.target.matches(".gmh-import-file")) void this.importFile(event.target.files?.[0]);
+      if (event.target.matches(".gmh-obsidian-file")) void this.importObsidian(event.target.files?.[0]);
+      if (event.target.matches(".gmh-session-filter")) {
+        this.sessionFilter = event.target.value;
+        this.drawList();
+      }
       if (event.target.matches("select[name=type]")) {
         const form = event.target.closest("form");
         const section = form?.querySelector(".gmh-custom-fields");
@@ -145,10 +176,19 @@ class GMHelpApp extends foundry.applications.api.ApplicationV2 {
     return documents().filter((doc) => {
       const rec = getRecord(doc);
       if (this.activeType !== "all" && rec.type !== this.activeType) return false;
+      if (this.activeType === "session" && this.sessionFilter !== "all" &&
+        (rec.sessionStatus || "Notes") !== this.sessionFilter) return false;
       if (!normalize(this.search)) return true;
       const searchable = [doc.name, ...Object.values(rec).flat()].join(" ");
       return normalize(searchable).includes(normalize(this.search));
-    }).sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }));
+    }).sort((a, b) => {
+      if (this.activeType === "session" || (getRecord(a).type === "session" && getRecord(b).type === "session")) {
+        const na = Number(getRecord(a).sessionNumber ?? Number.POSITIVE_INFINITY);
+        const nb = Number(getRecord(b).sessionNumber ?? Number.POSITIVE_INFINITY);
+        if (na !== nb) return na - nb;
+      }
+      return a.name.localeCompare(b.name, "en", { sensitivity: "base" });
+    });
   }
 
   typeButtons() {
@@ -160,15 +200,30 @@ class GMHelpApp extends foundry.applications.api.ApplicationV2 {
     ).join("");
   }
 
+  sessionFiltersHTML() {
+    if (this.activeType !== "session") return "";
+    const options = ["all", "Notes", "Planned", "Prepared", "In Progress", "Played"];
+    return '<label>Session progress <select class="gmh-session-filter">' +
+      options.map(v => '<option value="' + esc(v) + '"' + (v === this.sessionFilter ? ' selected' : '') + '>' +
+        esc(v === "all" ? "All sessions" : v) + '</option>').join("") +
+      '</select></label>';
+  }
+
+  sessionPeers() {
+    return documents().filter(d => getRecord(d).type === "session")
+      .sort((a,b) => Number(getRecord(a).sessionNumber || 99999) - Number(getRecord(b).sessionNumber || 99999));
+  }
+
   listHTML() {
     const matches = this.filteredDocs();
     if (!matches.length) return '<div class="gmh-no-results">No matching entries.<p>Create a record or import the Averis starter data.</p></div>';
     return matches.map((doc) => {
       const record = getRecord(doc);
       const art = imageSrc(record.image);
+      const sessionNote = record.type === "session" ? " · " + (record.sessionStatus || "Notes") : "";
       return '<button type="button" class="gmh-entry ' + (doc.id === this.selectedId ? "active" : "") + '" data-gmh-action="select" data-id="' + esc(doc.id) + '">' +
         '<span class="gmh-thumb">' + (art ? '<img loading="lazy" src="' + esc(art) + '" alt="">' : icon(TYPES[record.type]?.[1] || "fa-folder")) + '</span>' +
-        '<span class="gmh-entry-info"><strong>' + esc(doc.name) + '</strong><small>' + esc(short(record.subtitle || record.summary || displayType(record.type), 52)) + '</small></span>' +
+        '<span class="gmh-entry-info"><strong>' + esc(doc.name) + '</strong><small>' + esc(short(record.subtitle || record.summary || displayType(record.type), 52)) + esc(sessionNote) + '</small></span>' +
         '</button>';
     }).join("");
   }
@@ -179,6 +234,7 @@ class GMHelpApp extends foundry.applications.api.ApplicationV2 {
     const list = root.querySelector(".gmh-items");
     const previousScroll = list?.scrollTop || 0;
     root.querySelector(".gmh-types").innerHTML = this.typeButtons();
+    root.querySelector(".gmh-session-filters").innerHTML = this.sessionFiltersHTML();
     list.innerHTML = this.listHTML();
     list.scrollTop = previousScroll;
     root.querySelector(".gmh-result-count").textContent = this.filteredDocs().length + " shown";
@@ -199,6 +255,13 @@ class GMHelpApp extends foundry.applications.api.ApplicationV2 {
     }
     const r = getRecord(doc);
     const art = imageSrc(r.image);
+    const peers = r.type === "session" ? this.sessionPeers() : [];
+    const peerIndex = peers.findIndex(d => d.id === doc.id);
+    const sessionNav = peerIndex < 0 ? "" : '<div class="gmh-session-nav">' +
+      (peerIndex > 0 ? '<button type="button" data-gmh-action="select" data-id="' + esc(peers[peerIndex - 1].id) + '">' + icon("fa-chevron-left") + ' Previous Session</button>' : '') +
+      '<span>Session ' + esc(r.sessionNumber || "?") + (r.sessionEnd && r.sessionEnd !== r.sessionNumber ? '–' + esc(r.sessionEnd) : "") + '</span>' +
+      (peerIndex + 1 < peers.length ? '<button type="button" data-gmh-action="select" data-id="' + esc(peers[peerIndex + 1].id) + '">Next Session ' + icon("fa-chevron-right") + '</button>' : '') +
+      '</div>';
     const meta = [...COMMON_FIELDS, ...(TYPE_FIELDS[r.type] || [])].filter(([key]) => r[key]);
     const related = (r.related || []).map((id) => documents().find((doc) => doc.id === id)).filter(Boolean);
     const reverse = documents().filter((x) => x.id !== doc.id && (getRecord(x).related || []).includes(doc.id));
@@ -213,12 +276,16 @@ class GMHelpApp extends foundry.applications.api.ApplicationV2 {
       '<button type="button" data-gmh-action="delete" class="gmh-danger">' + icon("fa-trash") + ' Delete</button></div>',
       art ? '<img class="gmh-cover" src="' + esc(art) + '" alt="Artwork for ' + esc(doc.name) + '">' : "",
       '<h1>' + esc(doc.name) + '</h1>',
+      sessionNav,
+      r.sourcePath ? '<div class="gmh-source-path">' + icon("fa-file-lines") + ' ' + esc(r.sourcePath) + '</div>' : '',
       r.subtitle ? '<div class="gmh-subtitle">' + esc(r.subtitle) + '</div>' : "",
       r.tags ? '<div class="gmh-tags">' + r.tags.split(",").filter(Boolean).map((t) => '<span>' + esc(t.trim()) + '</span>').join("") + '</div>' : "",
       r.summary ? '<div class="gmh-summary">' + paragraphs(r.summary) + '</div>' : "",
       meta.length ? '<dl class="gmh-meta">' + meta.map(([key, label]) =>
         '<div><dt>' + esc(label) + '</dt><dd>' + paragraphs(r[key]) + '</dd></div>').join("") + '</dl>' : "",
       r.description ? '<section class="gmh-section"><h3>Detailed Information</h3><p>' + paragraphs(r.description) + '</p></section>' : "",
+      r.body ? '<section class="gmh-section gmh-md-section"><h3>' + icon("fa-file-lines") + ' Obsidian Notes</h3>' +
+        '<div class="gmh-markdown">' + renderObsidianMarkdown(r.body, r, documents()) + '</div></section>' : "",
       r.secrets ? '<section class="gmh-section gmh-secret"><h3>' + icon("fa-user-secret") + ' GM Secrets & Hidden Notes</h3><p>' + paragraphs(r.secrets) + '</p></section>' : "",
       r.uuid ? '<section class="gmh-section"><h3>Linked Foundry Document</h3><button type="button" class="gmh-link" data-gmh-action="open-uuid">' +
         icon("fa-arrow-up-right-from-square") + ' Open ' + esc(r.uuid) + '</button></section>' : "",
@@ -229,7 +296,13 @@ class GMHelpApp extends foundry.applications.api.ApplicationV2 {
   }
 
   customFieldsHTML(type, record) {
-    return (TYPE_FIELDS[safeType(type)] || []).map(([key, label, long]) => textField(key, label, record[key] || "", long)).join("");
+    return (TYPE_FIELDS[safeType(type)] || []).map(([key, label, long]) => {
+      if (key === "sessionStatus") return '<label class="gmh-field"><span>Session status</span><select name="sessionStatus">' +
+        ["Notes", "Planned", "Prepared", "In Progress", "Played"].map(value =>
+        '<option value="' + esc(value) + '"' + ((record.sessionStatus || "Notes") === value ? " selected" : "") +
+        '>' + esc(value) + '</option>').join("") + '</select></label>';
+      return textField(key, label, record[key] || "", long);
+    }).join("");
   }
 
   editorHTML() {
@@ -256,6 +329,7 @@ class GMHelpApp extends foundry.applications.api.ApplicationV2 {
       textField("summary", "Quick Summary", r.summary || "", true),
       '<h3>Category Details</h3><div class="gmh-custom-fields gmh-form-grid">' + this.customFieldsHTML(type, r) + '</div>',
       textField("description", "Detailed Information", r.description || "", true),
+      textField("body", "Original Obsidian Markdown / full notes", r.body || "", true),
       textField("secrets", "GM Secrets / Hidden Notes", r.secrets || "", true),
       textField("uuid", "Linked Foundry UUID (optional)", r.uuid || ""),
       '<label class="gmh-field"><span>Related Entries (Ctrl/Cmd-click to select multiple)</span><select name="related" multiple size="6">' + relatedOpts + '</select></label>',
@@ -311,6 +385,8 @@ class GMHelpApp extends foundry.applications.api.ApplicationV2 {
         this.exportBackup();
       } else if (action === "import") {
         this.root?.querySelector(".gmh-import-file")?.click();
+      } else if (action === "obsidian") {
+        this.root?.querySelector(".gmh-obsidian-file")?.click();
       }
     } catch (error) {
       console.error("GM Help | Action failed", error);
@@ -374,7 +450,7 @@ class GMHelpApp extends foundry.applications.api.ApplicationV2 {
     for (const entry of entries) {
       const name = String(entry?.name || "").trim().slice(0, 200);
       if (!name) { skipped++; continue; }
-      const record = cleanRecord(entry);
+      const record = cleanRecord(entry.record?.type ? entry.record : entry);
       if (record.key && keys.has(record.key)) { skipped++; continue; }
       await createRecord(name, record);
       if (record.key) keys.add(record.key);
@@ -383,6 +459,35 @@ class GMHelpApp extends foundry.applications.api.ApplicationV2 {
     this.drawList();
     this.drawDetail();
     return { added, skipped };
+  }
+
+  async importObsidian(file) {
+    if (!file || !isGM()) return;
+    const input = this.root?.querySelector(".gmh-obsidian-file");
+    try {
+      const bundle = await readAverisZip(file);
+      const count = bundle.payload.entries.length;
+      const imageCount = bundle.payload.assets.length;
+      if (!window.confirm("Import " + count + " private Obsidian notes and " + imageCount +
+        " images into GM Help? Existing matching Obsidian notes will be skipped; you can safely re-import.")) return;
+      ui.notifications.info("GM Help: Importing Obsidian notes…");
+      const result = await this.addRecords(bundle.payload.entries);
+      ui.notifications.info("GM Help: Imported " + result.added + " notes; skipped " + result.skipped + ". Uploading images…");
+      let uploads = { uploaded: 0, failed: [] };
+      if (imageCount) uploads = await uploadAverisImages(bundle);
+      const imageResult = uploads.failed.length ? " Some images failed to upload: " +
+        uploads.failed.length + ". You can re-import the bundle to retry." : " All images uploaded.";
+      ui.notifications.info("GM Help: " + result.added + " new notes; " +
+        uploads.uploaded + " images." + imageResult, { permanent: uploads.failed.length > 0 });
+      this.activeType = "session";
+      this.search = "";
+      this.drawList(); this.drawDetail();
+    } catch (error) {
+      console.error("GM Help | Obsidian bundle import failed", error);
+      ui.notifications.error("GM Help Obsidian import: " + error.message);
+    } finally {
+      if (input) input.value = "";
+    }
   }
 
   async seed() {
@@ -497,5 +602,32 @@ Hooks.once("init", () => {
 });
 Hooks.once("ready", () => {
   if (!isGM()) return;
-  game.gmHelp = { open: openHelp, version: "0.2.1" };
+  game.gmHelp = { open: openHelp, version: "0.3.0" };
+});
+
+
+/* Foundry V14 public Scene Controls extension point. Only creates the GM Help
+ * control; never manipulates DOM/CSS or Monk's controls. */
+Hooks.on("getSceneControlButtons", (controls) => {
+  if (!game.user?.isGM || !controls || controls.gmHelp) return;
+  const maxOrder = Math.max(0,...Object.values(controls).map(c => Number(c.order) || 0));
+  controls.gmHelp = {
+    name: "gmHelp",
+    title: "GM Help — Averis Encyclopedia",
+    icon: "fa-solid fa-book-open",
+    order: maxOrder + 1,
+    visible: true,
+    onChange: (event, active) => { if (active) openHelp(); },
+    tools: {
+      open: {
+        name: "open",
+        title: "Open GM Help",
+        icon: "fa-solid fa-book-open",
+        order: 0,
+        button: true,
+        visible: true,
+        onChange: () => openHelp()
+      }
+    }
+  };
 });
