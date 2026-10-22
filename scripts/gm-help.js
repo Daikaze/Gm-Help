@@ -1,5 +1,5 @@
 import { AVERIS_SEED } from "./averis-data.js";
-import { registerStorage, documents, getRecord, createRecord, legacyDocuments } from "./storage.js";
+import { loadArchive, registerLegacySetting, legacyWorldRecords, clearLegacySetting, documents, getRecord, createRecord, legacyDocuments } from "./storage.js";
 
 const MODULE_ID = "gm-help";
 const TYPES = {
@@ -83,6 +83,7 @@ class GMHelpApp extends foundry.applications.api.ApplicationV2 {
   get root() { return this.element?.querySelector(".gmh-root"); }
 
   async _renderHTML() {
+    await loadArchive();
     const root = document.createElement("div");
     root.className = "gmh-root";
     root.innerHTML = [
@@ -92,6 +93,9 @@ class GMHelpApp extends foundry.applications.api.ApplicationV2 {
       '<button type="button" data-gmh-action="seed" title="Import the built-in Averis lore (skips existing records)">' + icon("fa-wand-magic-sparkles") + ' Averis Starter</button>',
       '<button type="button" data-gmh-action="import">' + icon("fa-file-import") + ' Import</button>',
       '<button type="button" data-gmh-action="export">' + icon("fa-file-export") + ' Backup</button>',
+      ...(legacyWorldRecords().length ? [
+        '<button type="button" data-action="recover-world" title="Recover any entries saved during v0.2.0">' + icon("fa-rotate-left") + ' Recover v0.2 Notes</button>'
+      ] : []),
       ...(legacyDocuments().length ? [
         '<button type="button" data-gmh-action="migrate" title="Copy v0.1 Journal records into the separate archive">' + icon("fa-copy") + ' Import Old Records</button>',
         '<button type="button" data-gmh-action="cleanup-legacy" title="Delete legacy Journal records after verified migration and backup">' + icon("fa-broom") + ' Cleanup Old Records</button>'
@@ -299,6 +303,8 @@ class GMHelpApp extends foundry.applications.api.ApplicationV2 {
         await this.seed();
       } else if (action === "migrate") {
         await this.migrateLegacy();
+      } else if (action === "recover-world") {
+        await this.recoverWorld();
       } else if (action === "cleanup-legacy") {
         await this.cleanupLegacy();
       } else if (action === "export") {
@@ -385,6 +391,24 @@ class GMHelpApp extends foundry.applications.api.ApplicationV2 {
     ui.notifications.info("GM Help: Added " + result.added + " entries, skipped " + result.skipped + ".");
   }
 
+  async recoverWorld() {
+    if (!isGM()) return;
+    const entries = legacyWorldRecords();
+    if (!entries.length) { ui.notifications.info("No v0.2.0 records were found."); return; }
+    if (!window.confirm("Recover " + entries.length + " v0.2.0 entries from the old world setting into the GM-private compendium?")) return;
+    const result = await this.addRecords(entries);
+    if (result.added + result.skipped < entries.length) {
+      ui.notifications.error("Some entries were not processed. The old setting has NOT been cleared.");
+      return;
+    }
+    if (window.confirm("Recovered " + result.added + " entries and skipped " + result.skipped + ". Clear the OLD shared world setting now? This is recommended for privacy. Your private archive entries will remain.")) {
+      await clearLegacySetting();
+      ui.notifications.info("GM Help: Legacy shared world setting cleared.");
+    } else {
+      ui.notifications.warn("Old v0.2.0 world setting still contains notes. Clear it from GM Help after verifying your archive.");
+    }
+  }
+
   async migrateLegacy() {
     if (!isGM()) return;
     const old = legacyDocuments();
@@ -461,7 +485,7 @@ function openHelp() {
   appInstance.render(true);
 }
 Hooks.once("init", () => {
-  registerStorage();
+  registerLegacySetting();
   game.settings.registerMenu(MODULE_ID, "open", {
     name: "GM Help Archive",
     label: "Open GM Help",
@@ -473,5 +497,5 @@ Hooks.once("init", () => {
 });
 Hooks.once("ready", () => {
   if (!isGM()) return;
-  game.gmHelp = { open: openHelp, version: "0.1.0" };
+  game.gmHelp = { open: openHelp, version: "0.2.1" };
 });
