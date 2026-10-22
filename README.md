@@ -1,57 +1,59 @@
-# GM Help v0.3.0 — Averis Encyclopedia
+# GM Help v0.4.0 — Averis Encyclopedia
 
-GM-only encyclopedia for **Foundry VTT v14** and DnD5e 5.3.3.
+A private GM encyclopedia module for **Foundry VTT v14** / **DnD5e 5.3.3**.
 
-## New features
+## v0.4.0 — Direct Obsidian ZIP import (Option B)
 
-- **Sessions** category, numeric sorting for session numbers and fractional sessions (32.5, 36.5).
-- Editable session status: Notes, Planned, Prepared, In Progress, Played. Date and Highlights fields.
-- Previous / Next Session navigation, status filter.
-- Preserves full text and Obsidian Markdown of imported notes (including headings, tables, DC checks, callouts, wiki links and DM notes).
-- Left-side **GM Help book icon** in Foundry scene controls for GMs via official v14 getSceneControlButtons extension hook.
-- **Obsidian ZIP** button to import the private Averis data bundle without publicly posting the data to GitHub.
-- New categories: Characters, Sessions, Mechanics, Creatures, Deities.
-- Retains GM-only compendium storage, isolated CSS, saved records, import/export, and previous migration tools.
+GM Help can now import the **original Obsidian vault ZIP** directly, e.g. **D&D.zip**, without any repackaging, in addition to the prepared Averis_GM_Help_Import.zip.
 
-## Private Averis Obsidian data
+- Accepts standard ZIP compression methods **STORE (0)** and **DEFLATE (8)** via native browser DecompressionStream.
+- Reads the ZIP directory and processes files **one at a time**, without loading the complete 199 MB file into memory.
+- Imports all Markdown notes from the vault into a **GM-private world compendium**.
+- Automatically categorizes notes (Sessions, NPCs, Characters, Factions, Lore, Locations, Items, Mechanics, Creatures).
+- Extracts session numbers, ranges and fractional numbers; keeps session ordering, statuses and navigation.
+- Detects Obsidian wiki-links, pictures and relative source paths.
+- Converts pictures one at a time into **1280px WebP** using the Foundry browser and uploads them into Data/gm-help/obsidian-assets.
+- Skips Obsidian configuration, plugin scripts, nested ZIP files and system metadata.
+- Checks ZIP entry CRC, path traversal, entry count and decompression limits.
+- Deduplicates notes using source path SHA-1 keys consistent with earlier prepared imports.
+- Keeps entire long Markdown source in records (previous versions accidentally truncated source text at 50,000 characters).
+- **Scroll icon** (fa-scroll) in the Foundry left Scene Controls palette, Module Settings and GM Help title.
+- Retains the earlier fixes preventing global CSS contamination and Monk's Enhanced Journal interaction.
 
-The user's supplied vault contains **140 Markdown files**, including **28 session logs**, and **74 images**. The processed private import file is called **Averis_GM_Help_Import.zip**.
+## Import the original D&D.zip
 
-**The complete campaign data and art are not committed to this public GitHub repository.** Download the separate private ZIP from the ChatGPT conversation.
+1. In **Add-on Modules**, update GM Help to **v0.4.0**.
+2. Close/reopen the Foundry world and reload the browser, especially if you previously used v0.1.0.
+3. As GM, click the **scroll icon** in the left scene tools or open **Game Settings > Module Settings > GM Help**.
+4. Choose **Import Obsidian**, select your **original D&D.zip** (199 MB) and confirm.
+5. The module imports the notes into the restricted **GM Help | Private Archive** world compendium and processes picture uploads sequentially.
+6. Open Sessions to view and edit each session. Use the Backup button for JSON backups.
 
-### Import
+The original vault ZIP itself is **not uploaded** to the server or GitHub: Foundry reads it in your browser. Only the extracted notes and converted images go into your own Foundry world. Private campaign content is NOT committed to this public repository.
 
-1. Download Averis_GM_Help_Import.zip from the conversation.
-2. Update GM Help to v0.3.0, enable the module, and fully reload the Foundry world.
-3. As GM, click the **book icon** in Foundry left Scene Controls. Or use Game Settings → Configure Settings → Module Settings → GM Help.
-4. In GM Help click **Obsidian ZIP**, choose the prepared ZIP, and confirm.
-5. GM Help copies your notes to the GM-restricted world compendium and uploads WebP images to Foundry User Data: gm-help/obsidian-assets.
-6. Select Sessions, open a session and edit its status. Use **Backup** for periodic JSON backups.
+## What the provided D&D.zip contains
 
-**Do not unzip the private ZIP to install it as a module.** The ZIP importer accepts the prepared STORE-format ZIP only, not arbitrary deflated Obsidian vault ZIPs. Image upload requires the GM to have permission to write to Foundry User Data.
+Based on inspection of the uploaded archive: **140 Markdown documents, 28 session files and 74 images**. The archive also contains configuration files and one nested ZIP, which the importer intentionally ignores.
 
-### Preservation and limitations
+## Safety and limitations
 
-- **140 original markdown source files** are preserved in their imported record bodies; importer skips existing matching keys and never overwrites edits.
-- Source paths and wiki-link targets are stored; source text can be edited without truncating lore.
-- Obsidian-only plugins such as Meta Bind and Dataview are not executed. Markdown formatting is rendered safely in a built-in viewer.
-- **74 optimized WebP images** are stored in Foundry User Data. Keep the private ZIP to restore images: JSON-only Backup contains metadata/notes but not picture bytes.
-- GM Help is private, but images served from User Data are not encrypted.
-- A few ambiguous Obsidian wiki-links or reference images may need manual adjustments.
-- The supplied vault has no separate dedicated city folder; the City category is available for future additions.
+- Maximum source ZIP 500 MB, 5,000 ZIP entries, 1,200 Markdown notes, 400 images, and 500 MB selected uncompressed contents.
+- Maximum individual Markdown note 1.2 MB, image 35 MB.
+- Requires a recent browser supporting native DecompressionStream('deflate-raw') and WebP canvas encoding.
+- If individual images fail to upload, imports of notes can still succeed; re-importing the same ZIP retries missing images without overwriting existing notes.
+- Foundry **User Data images are not encrypted**, so do not publish their paths for DM-only spoilers.
+- Obsidian HTML, Dataview, Meta Bind and JavaScript are not executed by the viewer; complex layouts may render differently.
+- JSON Backup includes note metadata and links but not the binary images; retain the original ZIP too.
+- A live test with the user's exact Foundry V14 build and Monk's Enhanced Journal is still required.
 
-## Update
+## Compatibility with prior versions
 
-Manifest URL: https://raw.githubusercontent.com/Daikaze/Gm-Help/main/module.json
+Existing GM Help compendium notes are retained. Notes previously imported from prepared bundles will not be duplicated because original vault paths use the same stable import keys.
 
-**After updating fully reload the Foundry browser/client.** GM Help v0.1.0 caused an inherited ApplicationV2 default option mutation which could turn unrelated windows blue and interfere with Monk's Enhanced Journal. This is fixed: GM Help does not mutate parent options, and all CSS selectors are isolated to #gm-help-library.
+The v0.1.0 Import Old Records and v0.2.0 Recover v0.2 Notes tools remain available. No global stylesheet is applied, and no Monk's or native JournalDirectory UI is patched.
 
-The icon is added through the official Foundry v14 Scene Controls hook. No Monk's code, existing controls, JournalDirectory DOM or external CSS are changed.
+## Install manifest
 
-## Migrating older versions
+https://raw.githubusercontent.com/Daikaze/Gm-Help/main/module.json
 
-Old v0.1.0 GM Help Journal records may be copied with Import Old Records and optionally cleaned up after verifying and backing up. The brief v0.2.0 world setting can be recovered with Recover v0.2 Notes. Updates never automatically delete older notes.
-
-## Testing
-
-JavaScript syntax and simulated Foundry compendium operations, session sorting/filtering, markdown link rendering and left control registration were checked. A live Foundry v14 test with Monk's is still needed.
+Source: https://github.com/Daikaze/Gm-Help

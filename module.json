@@ -1,8 +1,8 @@
 {
   "id": "gm-help",
   "title": "GM Help",
-  "description": "GM-only encyclopedia for Foundry v14: Obsidian private ZIP import, session tracker and left-side scene control icon.",
-  "version": "0.3.0",
+  "description": "GM-only encyclopedia for Foundry V14 with direct import of unmodified Obsidian vault ZIPs, session tracking and a scroll icon in scene controls.",
+  "version": "0.4.0",
   "authors": [
     {
       "name": "Daikaze"

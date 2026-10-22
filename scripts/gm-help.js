@@ -71,9 +71,9 @@ function cleanRecord(raw) {
     uuid: "", related: [], key: "", body: "", sourcePath: "", sourceTitle: "", links: [], media: {}
   };
   for (const key of ["type", "tags", "summary", "description", "secrets", "image",
-    "uuid", "key", "body", "sourcePath", "sourceTitle", ...COMMON_FIELDS.map((f) => f[0]), ...Object.values(TYPE_FIELDS).flat().map((f) => f[0])]) {
+    "uuid", "key", "body", "sourcePath", "sourceTitle", ...COMMON_FIELDS.map((f) => f[0]), ...Object.values(TYPE_FIELDS).flatMap((fields) => fields.map(([key]) => key))]) {
     if (key === "type") continue;
-    if (typeof raw?.[key] === "string") result[key] = raw[key].slice(0, 50000);
+    if (typeof raw?.[key] === "string") result[key] = raw[key].slice(0, key === "body" ? 1_200_000 : 50_000);
   }
   result.related = Array.isArray(raw?.related) ? raw.related.filter(v => typeof v === "string").slice(0, 100) : [];
   result.links = Array.isArray(raw?.links) ? raw.links.filter(v => typeof v === "string").slice(0, 300) : [];
@@ -89,7 +89,7 @@ class GMHelpApp extends foundry.applications.api.ApplicationV2 {
   static DEFAULT_OPTIONS = {
     id: "gm-help-library",
     classes: ["gm-help-window"],
-    window: { title: "GM Help | Averis Archive", icon: "fa-solid fa-book-open", resizable: true },
+    window: { title: "GM Help | Averis Archive", icon: "fa-solid fa-scroll", resizable: true },
     position: { width: 1100, height: 750 }
   };
 
@@ -111,11 +111,11 @@ class GMHelpApp extends foundry.applications.api.ApplicationV2 {
     root.className = "gmh-root";
     root.innerHTML = [
       '<header class="gmh-header">',
-      '<div class="gmh-brand">' + icon("fa-book-open") + '<div><strong>GM HELP</strong><small>AVERIS · PRIVATE WORLD ARCHIVE</small></div></div>',
+      '<div class="gmh-brand">' + icon("fa-scroll") + '<div><strong>GM HELP</strong><small>AVERIS · PRIVATE WORLD ARCHIVE</small></div></div>',
       '<div class="gmh-actions">',
       '<button type="button" data-gmh-action="seed" title="Import the built-in Averis lore (skips existing records)">' + icon("fa-wand-magic-sparkles") + ' Averis Starter</button>',
       '<button type="button" data-gmh-action="import">' + icon("fa-file-import") + ' Import</button>',
-      '<button type="button" data-gmh-action="obsidian" title="Import the prepared private Obsidian ZIP">' + icon("fa-box-archive") + ' Obsidian ZIP</button>',
+      '<button type="button" data-gmh-action="obsidian" title="Import original D&D.zip or prepared GM Help ZIP">' + icon("fa-box-archive") + ' Import Obsidian</button>',
       '<button type="button" data-gmh-action="export">' + icon("fa-file-export") + ' Backup</button>',
       ...(legacyWorldRecords().length ? [
         '<button type="button" data-action="recover-world" title="Recover any entries saved during v0.2.0">' + icon("fa-rotate-left") + ' Recover v0.2 Notes</button>'
@@ -466,6 +466,10 @@ class GMHelpApp extends foundry.applications.api.ApplicationV2 {
     const input = this.root?.querySelector(".gmh-obsidian-file");
     try {
       const bundle = await readAverisZip(file);
+      ui.notifications.info(bundle.mode === "raw-vault"
+        ? "GM Help: Original Obsidian vault recognized (" + bundle.payload.entries.length +
+          " notes, " + bundle.payload.assets.length + " images)."
+        : "GM Help: Prepared Obsidian archive recognized.");
       const count = bundle.payload.entries.length;
       const imageCount = bundle.payload.assets.length;
       if (!window.confirm("Import " + count + " private Obsidian notes and " + imageCount +
@@ -474,11 +478,13 @@ class GMHelpApp extends foundry.applications.api.ApplicationV2 {
       const result = await this.addRecords(bundle.payload.entries);
       ui.notifications.info("GM Help: Imported " + result.added + " notes; skipped " + result.skipped + ". Uploading images…");
       let uploads = { uploaded: 0, failed: [] };
-      if (imageCount) uploads = await uploadAverisImages(bundle);
+      if (imageCount) uploads = await uploadAverisImages(bundle, message =>
+        ui.notifications.info(message));
       const imageResult = uploads.failed.length ? " Some images failed to upload: " +
         uploads.failed.length + ". You can re-import the bundle to retry." : " All images uploaded.";
       ui.notifications.info("GM Help: " + result.added + " new notes; " +
-        uploads.uploaded + " images." + imageResult, { permanent: uploads.failed.length > 0 });
+        uploads.uploaded + " images uploaded, " + (uploads.skipped || 0) +
+        " already present." + imageResult, { permanent: uploads.failed.length > 0 });
       this.activeType = "session";
       this.search = "";
       this.drawList(); this.drawDetail();
@@ -595,14 +601,14 @@ Hooks.once("init", () => {
     name: "GM Help Archive",
     label: "Open GM Help",
     hint: "Private GM encyclopedia for NPCs, cities, factions, quests and world lore.",
-    icon: "fa-solid fa-book-open",
+    icon: "fa-solid fa-scroll",
     type: GMHelpApp,
     restricted: true
   });
 });
 Hooks.once("ready", () => {
   if (!isGM()) return;
-  game.gmHelp = { open: openHelp, version: "0.3.0" };
+  game.gmHelp = { open: openHelp, version: "0.4.0" };
 });
 
 
@@ -614,7 +620,7 @@ Hooks.on("getSceneControlButtons", (controls) => {
   controls.gmHelp = {
     name: "gmHelp",
     title: "GM Help — Averis Encyclopedia",
-    icon: "fa-solid fa-book-open",
+    icon: "fa-solid fa-scroll",
     order: maxOrder + 1,
     visible: true,
     onChange: (event, active) => { if (active) openHelp(); },
@@ -622,7 +628,7 @@ Hooks.on("getSceneControlButtons", (controls) => {
       open: {
         name: "open",
         title: "Open GM Help",
-        icon: "fa-solid fa-book-open",
+        icon: "fa-solid fa-scroll",
         order: 0,
         button: true,
         visible: true,
