@@ -1,0 +1,26 @@
+{
+  "id": "gm-help",
+  "title": "GM Help",
+  "description": "Private Game Master encyclopedia for NPCs, cities, factions, quests, events and world lore, with search, artwork and optional Averis starter content.",
+  "version": "0.1.0",
+  "authors": [
+    {
+      "name": "Daikaze"
+    }
+  ],
+  "compatibility": {
+    "minimum": "14",
+    "verified": "14"
+  },
+  "esmodules": [
+    "scripts/gm-help.js"
+  ],
+  "styles": [
+    "styles/gm-help.css"
+  ],
+  "url": "https://github.com/Daikaze/Gm-Help",
+  "manifest": "https://raw.githubusercontent.com/Daikaze/Gm-Help/main/module.json",
+  "download": "https://github.com/Daikaze/Gm-Help/archive/refs/heads/main.zip",
+  "bugs": "https://github.com/Daikaze/Gm-Help/issues",
+  "readme": "https://github.com/Daikaze/Gm-Help#readme"
+}
