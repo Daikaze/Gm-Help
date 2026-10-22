@@ -1,4 +1,5 @@
 import { AVERIS_SEED } from "./averis-data.js";
+import { registerStorage, documents, getRecord, createRecord, legacyDocuments } from "./storage.js";
 
 const MODULE_ID = "gm-help";
 const TYPES = {
@@ -42,29 +43,9 @@ const textField = (key, label, value, long = false) =>
 const isGM = () => Boolean(game.user?.isGM);
 const normalize = (value) => String(value || "").toLocaleLowerCase().trim();
 const displayType = (type) => TYPES[type]?.[0] || "Other";
-const documents = () => game.journal.filter((doc) => doc.getFlag(MODULE_ID, "record")?.type);
-const getRecord = (doc) => doc?.getFlag(MODULE_ID, "record") || {};
 const safeType = (type) => TYPES[type] ? type : "other";
 const imageSrc = (url) => /^(?!\s*(?:javascript|data):)[^\x00-\x1f]*$/i.test(String(url || "")) ? String(url || "") : "";
 
-async function archiveFolder() {
-  let folder = game.folders.find((f) => f.type === "JournalEntry" && f.getFlag(MODULE_ID, "archive"));
-  if (!folder) {
-    folder = await Folder.create({
-      name: "GM Help | Secret Archive", type: "JournalEntry",
-      flags: { [MODULE_ID]: { archive: true } }
-    });
-  }
-  return folder;
-}
-async function createRecord(name, record) {
-  const folder = await archiveFolder();
-  return await JournalEntry.create({
-    name, folder: folder.id,
-    ownership: { default: CONST.DOCUMENT_OWNERSHIP_LEVELS.NONE },
-    flags: { [MODULE_ID]: { record } }
-  });
-}
 function cleanRecord(raw) {
   const type = safeType(raw?.type);
   const result = {
@@ -81,12 +62,14 @@ function cleanRecord(raw) {
 }
 
 class GMHelpApp extends foundry.applications.api.ApplicationV2 {
-  static DEFAULT_OPTIONS = foundry.utils.mergeObject(super.DEFAULT_OPTIONS, {
+  // ApplicationV2 automatically merges DEFAULT_OPTIONS through inheritance.
+  // Never mutate super.DEFAULT_OPTIONS: doing so styles/breaks *all* applications.
+  static DEFAULT_OPTIONS = {
     id: "gm-help-library",
     classes: ["gm-help-window"],
     window: { title: "GM Help | Averis Archive", icon: "fa-solid fa-book-open", resizable: true },
     position: { width: 1100, height: 750 }
-  });
+  };
 
   constructor(...args) {
     super(...args);
@@ -96,7 +79,7 @@ class GMHelpApp extends foundry.applications.api.ApplicationV2 {
     this.mode = "view";
   }
 
-  get currentDoc() { return this.selectedId ? game.journal.get(this.selectedId) : null; }
+  get currentDoc() { return this.selectedId ? documents().find((doc) => doc.id === this.selectedId) || null : null; }
   get root() { return this.element?.querySelector(".gmh-root"); }
 
   async _renderHTML() {
@@ -106,10 +89,14 @@ class GMHelpApp extends foundry.applications.api.ApplicationV2 {
       '<header class="gmh-header">',
       '<div class="gmh-brand">' + icon("fa-book-open") + '<div><strong>GM HELP</strong><small>AVERIS · PRIVATE WORLD ARCHIVE</small></div></div>',
       '<div class="gmh-actions">',
-      '<button type="button" data-action="seed" title="Import the built-in Averis lore (skips existing records)">' + icon("fa-wand-magic-sparkles") + ' Averis Starter</button>',
-      '<button type="button" data-action="import">' + icon("fa-file-import") + ' Import</button>',
-      '<button type="button" data-action="export">' + icon("fa-file-export") + ' Backup</button>',
-      '<button class="gmh-primary" type="button" data-action="new">' + icon("fa-plus") + ' New Entry</button>',
+      '<button type="button" data-gmh-action="seed" title="Import the built-in Averis lore (skips existing records)">' + icon("fa-wand-magic-sparkles") + ' Averis Starter</button>',
+      '<button type="button" data-gmh-action="import">' + icon("fa-file-import") + ' Import</button>',
+      '<button type="button" data-gmh-action="export">' + icon("fa-file-export") + ' Backup</button>',
+      ...(legacyDocuments().length ? [
+        '<button type="button" data-gmh-action="migrate" title="Copy v0.1 Journal records into the separate archive">' + icon("fa-copy") + ' Import Old Records</button>',
+        '<button type="button" data-gmh-action="cleanup-legacy" title="Delete legacy Journal records after verified migration and backup">' + icon("fa-broom") + ' Cleanup Old Records</button>'
+      ] : []),
+      '<button class="gmh-primary" type="button" data-gmh-action="new">' + icon("fa-plus") + ' New Entry</button>',
       '</div></header>',
       '<div class="gmh-main">',
       '<aside class="gmh-sidebar"><div class="gmh-search">' + icon("fa-magnifying-glass") + '<input class="gmh-search-input" aria-label="Search archive" placeholder="Search names, notes, tags…" value="' + esc(this.search) + '"></div>',
@@ -164,7 +151,7 @@ class GMHelpApp extends foundry.applications.api.ApplicationV2 {
     const all = documents();
     const buttons = [["all", "All Entries", "fa-layer-group"], ...Object.entries(TYPES).map(([key, value]) => [key, ...value])];
     return buttons.map(([key, label, glyph]) =>
-      '<button type="button" data-action="type" data-type="' + key + '" class="' + (key === this.activeType ? "active" : "") + '">' +
+      '<button type="button" data-gmh-action="type" data-type="' + key + '" class="' + (key === this.activeType ? "active" : "") + '">' +
       icon(glyph) + '<span>' + label + '</span><em>' + (key === "all" ? all.length : all.filter((d) => getRecord(d).type === key).length) + '</em></button>'
     ).join("");
   }
@@ -175,7 +162,7 @@ class GMHelpApp extends foundry.applications.api.ApplicationV2 {
     return matches.map((doc) => {
       const record = getRecord(doc);
       const art = imageSrc(record.image);
-      return '<button type="button" class="gmh-entry ' + (doc.id === this.selectedId ? "active" : "") + '" data-action="select" data-id="' + esc(doc.id) + '">' +
+      return '<button type="button" class="gmh-entry ' + (doc.id === this.selectedId ? "active" : "") + '" data-gmh-action="select" data-id="' + esc(doc.id) + '">' +
         '<span class="gmh-thumb">' + (art ? '<img loading="lazy" src="' + esc(art) + '" alt="">' : icon(TYPES[record.type]?.[1] || "fa-folder")) + '</span>' +
         '<span class="gmh-entry-info"><strong>' + esc(doc.name) + '</strong><small>' + esc(short(record.subtitle || record.summary || displayType(record.type), 52)) + '</small></span>' +
         '</button>';
@@ -204,22 +191,22 @@ class GMHelpApp extends foundry.applications.api.ApplicationV2 {
     if (!doc || !doc.getFlag(MODULE_ID, "record")) {
       return '<div class="gmh-empty"><div>' + icon("fa-book-open-reader") + '</div><h2>Your Campaign, One Place</h2>' +
         '<p>Select an entry to view its full details, or create a new NPC, city, faction, location or quest.</p>' +
-        '<button type="button" class="gmh-primary" data-action="new">' + icon("fa-plus") + ' Create Entry</button></div>';
+        '<button type="button" class="gmh-primary" data-gmh-action="new">' + icon("fa-plus") + ' Create Entry</button></div>';
     }
     const r = getRecord(doc);
     const art = imageSrc(r.image);
     const meta = [...COMMON_FIELDS, ...(TYPE_FIELDS[r.type] || [])].filter(([key]) => r[key]);
-    const related = (r.related || []).map((id) => game.journal.get(id)).filter((x) => x?.getFlag(MODULE_ID, "record"));
+    const related = (r.related || []).map((id) => documents().find((doc) => doc.id === id)).filter(Boolean);
     const reverse = documents().filter((x) => x.id !== doc.id && (getRecord(x).related || []).includes(doc.id));
     const linkButtons = (docs) => docs.map((x) =>
-      '<button type="button" class="gmh-link" data-action="select" data-id="' + esc(x.id) + '">' +
+      '<button type="button" class="gmh-link" data-gmh-action="select" data-id="' + esc(x.id) + '">' +
       icon(TYPES[getRecord(x).type]?.[1] || "fa-link") + " " + esc(x.name) + '</button>').join("");
     return [
       '<div class="gmh-view">',
       '<div class="gmh-detail-toolbar"><span class="gmh-type-chip">' + icon(TYPES[r.type]?.[1] || "fa-folder") + " " + esc(displayType(r.type)) + '</span>',
       '<span class="gmh-toolbar-spacer"></span>',
-      '<button type="button" data-action="edit">' + icon("fa-pen") + ' Edit</button>',
-      '<button type="button" data-action="delete" class="gmh-danger">' + icon("fa-trash") + ' Delete</button></div>',
+      '<button type="button" data-gmh-action="edit">' + icon("fa-pen") + ' Edit</button>',
+      '<button type="button" data-gmh-action="delete" class="gmh-danger">' + icon("fa-trash") + ' Delete</button></div>',
       art ? '<img class="gmh-cover" src="' + esc(art) + '" alt="Artwork for ' + esc(doc.name) + '">' : "",
       '<h1>' + esc(doc.name) + '</h1>',
       r.subtitle ? '<div class="gmh-subtitle">' + esc(r.subtitle) + '</div>' : "",
@@ -229,7 +216,7 @@ class GMHelpApp extends foundry.applications.api.ApplicationV2 {
         '<div><dt>' + esc(label) + '</dt><dd>' + paragraphs(r[key]) + '</dd></div>').join("") + '</dl>' : "",
       r.description ? '<section class="gmh-section"><h3>Detailed Information</h3><p>' + paragraphs(r.description) + '</p></section>' : "",
       r.secrets ? '<section class="gmh-section gmh-secret"><h3>' + icon("fa-user-secret") + ' GM Secrets & Hidden Notes</h3><p>' + paragraphs(r.secrets) + '</p></section>' : "",
-      r.uuid ? '<section class="gmh-section"><h3>Linked Foundry Document</h3><button type="button" class="gmh-link" data-action="open-uuid">' +
+      r.uuid ? '<section class="gmh-section"><h3>Linked Foundry Document</h3><button type="button" class="gmh-link" data-gmh-action="open-uuid">' +
         icon("fa-arrow-up-right-from-square") + ' Open ' + esc(r.uuid) + '</button></section>' : "",
       related.length ? '<section class="gmh-section"><h3>Connected Entries</h3><div class="gmh-links">' + linkButtons(related) + '</div></section>' : "",
       reverse.length ? '<section class="gmh-section"><h3>Referenced By</h3><div class="gmh-links">' + linkButtons(reverse) + '</div></section>' : "",
@@ -252,12 +239,12 @@ class GMHelpApp extends foundry.applications.api.ApplicationV2 {
     return [
       '<form class="gmh-editor">',
       '<div class="gmh-detail-toolbar"><strong>' + (doc ? "Edit Entry" : "New Entry") + '</strong><span class="gmh-toolbar-spacer"></span>',
-      '<button type="button" data-action="cancel">Cancel</button><button class="gmh-primary" type="submit">' + icon("fa-floppy-disk") + ' Save Entry</button></div>',
+      '<button type="button" data-gmh-action="cancel">Cancel</button><button class="gmh-primary" type="submit">' + icon("fa-floppy-disk") + ' Save Entry</button></div>',
       '<div class="gmh-form-grid">',
       '<label class="gmh-field"><span>Category</span><select name="type">' + opts + '</select></label>',
       textField("name", "Name *", doc?.name || ""),
       textField("image", "Image path / URL", r.image || ""),
-      '<div class="gmh-field gmh-file"><span>Choose Artwork</span><button type="button" data-action="pick-image">' + icon("fa-image") + ' Browse Foundry Files</button></div>',
+      '<div class="gmh-field gmh-file"><span>Choose Artwork</span><button type="button" data-gmh-action="pick-image">' + icon("fa-image") + ' Browse Foundry Files</button></div>',
       ...COMMON_FIELDS.map(([key, label]) => textField(key, label, r[key] || "")),
       textField("tags", "Search Tags (comma-separated)", r.tags || ""),
       '</div>',
@@ -269,16 +256,16 @@ class GMHelpApp extends foundry.applications.api.ApplicationV2 {
       textField("uuid", "Linked Foundry UUID (optional)", r.uuid || ""),
       '<label class="gmh-field"><span>Related Entries (Ctrl/Cmd-click to select multiple)</span><select name="related" multiple size="6">' + relatedOpts + '</select></label>',
       '</div>',
-      '<div class="gmh-form-footer"><button type="button" data-action="cancel">Cancel</button><button class="gmh-primary" type="submit">' + icon("fa-floppy-disk") + ' Save Entry</button></div>',
+      '<div class="gmh-form-footer"><button type="button" data-gmh-action="cancel">Cancel</button><button class="gmh-primary" type="submit">' + icon("fa-floppy-disk") + ' Save Entry</button></div>',
       '</form>'
     ].join("");
   }
 
   async onClick(event) {
-    const button = event.target.closest("[data-action]");
+    const button = event.target.closest("[data-gmh-action]");
     if (!button) return;
     event.preventDefault();
-    const action = button.dataset.action;
+    const action = button.dataset.gmhAction;
     try {
       if (action === "type") {
         this.activeType = button.dataset.type;
@@ -310,10 +297,14 @@ class GMHelpApp extends foundry.applications.api.ApplicationV2 {
         else ui.notifications.warn("The linked Foundry document was not found.");
       } else if (action === "seed") {
         await this.seed();
+      } else if (action === "migrate") {
+        await this.migrateLegacy();
+      } else if (action === "cleanup-legacy") {
+        await this.cleanupLegacy();
       } else if (action === "export") {
         this.exportBackup();
       } else if (action === "import") {
-        this.root.querySelector(".gmh-import-file").click();
+        this.root?.querySelector(".gmh-import-file")?.click();
       }
     } catch (error) {
       console.error("GM Help | Action failed", error);
@@ -394,6 +385,39 @@ class GMHelpApp extends foundry.applications.api.ApplicationV2 {
     ui.notifications.info("GM Help: Added " + result.added + " entries, skipped " + result.skipped + ".");
   }
 
+  async migrateLegacy() {
+    if (!isGM()) return;
+    const old = legacyDocuments();
+    if (!old.length) { ui.notifications.info("No legacy GM Help Journal records were found."); return; }
+    if (!window.confirm("Copy " + old.length + " entries from GM Help v0.1 Journal storage into the new independent archive? The original Journal entries will NOT be deleted.")) return;
+    const entries = old.map((doc) => ({
+      name: doc.name, ...getRecord(doc),
+      key: getRecord(doc).key || ("gm-help-legacy:" + doc.id)
+    }));
+    const result = await this.addRecords(entries);
+    ui.notifications.info("GM Help: Copied " + result.added + " entries; skipped " + result.skipped + ". Verify the records, export a backup, then use Cleanup Old Records.");
+  }
+
+  async cleanupLegacy() {
+    if (!isGM()) return;
+    const saved = documents();
+    const old = legacyDocuments();
+    // Never remove a journal unless the archived copy can be matched by import key.
+    const safe = old.filter((doc) => {
+      const key = getRecord(doc).key || ("gm-help-legacy:" + doc.id);
+      return saved.some((candidate) => getRecord(candidate).key === key && candidate.name === doc.name);
+    });
+    if (!safe.length) {
+      ui.notifications.warn("No safely matched legacy records. Import Old Records first.");
+      return;
+    }
+    if (!window.confirm("Delete " + safe.length + " matched legacy GM Help Journal entries? This is permanent. First verify the new records and export your backup. Other, unmatched Journal entries will remain untouched.")) return;
+    if (!window.confirm("Final confirmation: Permanently DELETE " + safe.length + " old Journal entries?")) return;
+    let removed = 0;
+    for (const doc of safe) { await doc.delete(); removed++; }
+    ui.notifications.info("GM Help: Removed " + removed + " old Journal entries; the independent archive remains intact.");
+  }
+
   exportBackup() {
     const data = {
       format: "gm-help", version: 1, exported: new Date().toISOString(),
@@ -436,21 +460,8 @@ function openHelp() {
   if (!appInstance) appInstance = new GMHelpApp();
   appInstance.render(true);
 }
-function journalButton(app, html) {
-  if (!isGM()) return;
-  const root = html instanceof HTMLElement ? html : html?.[0] || app.element;
-  const header = root?.querySelector(".directory-header .header-actions") || root?.querySelector(".directory-header");
-  if (!header || header.querySelector(".gmh-launcher")) return;
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "gmh-launcher";
-  button.title = "Open GM Help (GM only)";
-  button.innerHTML = icon("fa-book-open") + " GM Help";
-  button.addEventListener("click", openHelp);
-  header.appendChild(button);
-}
-
 Hooks.once("init", () => {
+  registerStorage();
   game.settings.registerMenu(MODULE_ID, "open", {
     name: "GM Help Archive",
     label: "Open GM Help",
@@ -464,11 +475,3 @@ Hooks.once("ready", () => {
   if (!isGM()) return;
   game.gmHelp = { open: openHelp, version: "0.1.0" };
 });
-Hooks.on("renderJournalDirectory", journalButton);
-for (const action of ["createJournalEntry", "updateJournalEntry", "deleteJournalEntry"]) {
-  Hooks.on(action, () => {
-    if (!isGM() || !appInstance?.root) return;
-    appInstance.drawList();
-    if (appInstance.mode === "view") appInstance.drawDetail();
-  });
-}

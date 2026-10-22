@@ -1,41 +1,63 @@
 # GM Help — Averis World Encyclopedia
 
-A **GM-only**, searchable campaign encyclopedia for **Foundry VTT v14** (designed for **DnD5e system 5.3.3**). Version **0.1.0**.
+**Version 0.2.0** — isolated, GM-only encyclopedia for **Foundry VTT v14** and **DnD5e 5.3.3**. Designed not to interfere with Monk's Enhanced Journal.
+
+## 0.2.0 Critical compatibility fix
+
+Version 0.1.0 accidentally merged into the superclass ApplicationV2 default options. Since Foundry's merge function can mutate its first argument, this contaminated shared parent configuration with GM Help's CSS class, color scheme, window size and title. It could make unrelated Foundry/Monk's windows turn blue or behave strangely.
+
+**Fixed in 0.2.0:**
+- Define subclass-only static DEFAULT_OPTIONS; never alter super.DEFAULT_OPTIONS.
+- Anchor all module CSS selectors to the unique #gm-help-library window. No page-level/global selectors.
+- Stop inserting buttons into JournalDirectory or listening to Journal document create/update/delete events.
+- Separate GM Help records from native Journals into a hidden **world setting**. Creating NPCs, cities and factions no longer triggers other journal-enhancement modules.
+- Give custom UI click actions a data-gmh-action namespace so they do not interfere with ApplicationV2's built-in data-action handling.
+- Switch to a neutral charcoal/bronze palette **inside GM Help only**.
+
+**Important:** Install the update and **fully reload the Foundry browser client** (Ctrl+F5 or reopen the world). The old module may already have changed in-memory ApplicationV2 options; only a fresh client startup clears that old memory.
 
 ## Features
 
-- Create, edit, delete, search and filter **NPCs, Cities, Locations, Factions, Quests, Events, World Lore, Important Items** and **Other** records.
-- Custom fields by category, searchable tags, detailed descriptions, confidential GM notes, character/scene Journal or Actor UUID links, image paths and relationships between records.
-- Responsive dark-mode browser with artwork, clickable cross-references and reverse references.
-- **Averis Starter** button imports **67** outlines from established campaign context, including Aegon, Refana, Radev, Rosalia, Hercules, House Krat, Ravda, Coralspire and the four planar barriers. It **skips** existing entries with matching import keys, **never overwrites** your edits.
-- Import and export portable JSON backups of the archive.
-- Stored as world **JournalEntry** documents in the **GM Help | Secret Archive** folder, with **NONE default ownership**, so players do not see the records. No cloud service or API keys.
+- GM-only searchable encyclopedia for **NPCs, Cities, Locations, Factions, Quests, Events, World Lore, Important Items** and Other records.
+- Category-specific fields (character backstory, personality, faction, goals; city government, population; faction leaders, etc.).
+- Optional artwork, tags, secret DM notes and Foundry UUID references.
+- Related entries, reverse links and real-time search.
+- **Averis Starter**: 67 editable lore outlines, imported once per unique key and not overwritten on subsequent imports.
+- JSON backup/export and import. **Export regularly to protect your campaign notes.**
 
-## Install
+## Install & update
 
-1. In Foundry VTT v14, open **Add-on Modules → Install Module → Manifest URL** and try:
-   https://raw.githubusercontent.com/Daikaze/Gm-Help/main/module.json
-2. If GitHub archive installation fails (due to the GitHub ZIP root folder name), use **Code → Download ZIP** in this repository, unzip and rename its root folder to **gm-help**, then place it inside Foundry's Data/modules directory. The file **module.json** must be directly inside **Data/modules/gm-help/**.
-3. Enable **GM Help** in **Manage Modules** within the campaign world.
-4. As GM: Open **Game Settings → Configure Settings → Module Settings → GM Help → Open GM Help**. A shortcut may also appear in the **Journal** sidebar header.
-5. Click **Averis Starter** to import the initial campaign outlines. You can edit every record and add artwork.
+Use **Add-on Modules → Install Module → Manifest URL**:
 
-**Important:** The archive is visible only to users with GM role in this initial release. Do not grant players manual ownership of its underlying Journal Entries, or they may see them through the normal Journal interface. JSON backups contain GM secrets; store them privately.
+https://raw.githubusercontent.com/Daikaze/Gm-Help/main/module.json
 
-## Usage
+Alternatively download the GitHub ZIP, extract to the Foundry Data modules folder, and ensure that Data/modules/gm-help/module.json exists.
 
-- **New Entry:** Select a category (or leave All), click New Entry, fill the name and details, then Save.
-- **Search:** Searches names, summaries, descriptions, tags and metadata within the current category.
-- **Artwork:** Use Browse Foundry Files or paste a local file path / HTTPS URL.
-- **Connections:** Multi-select related entries in the editor (Ctrl/Cmd-click). The linked entries become clickable in detail view.
-- **Foundry UUID:** Put a UUID such as Actor.abc123 or Scene.abc123 in the linked document field to open it from GM Help.
-- **Backup:** Export all records as a JSON file. **Import:** Add records from a GM Help JSON backup. Existing seed keys are not duplicated.
-- **Data:** Updates remain in your world Journal database even after updating or disabling the module, though the custom display UI requires the module.
+Enable under Manage Modules, then open **Game Settings → Configure Settings → Module Settings → GM Help → Open GM Help** as a GM.
 
-## Compatibility and development
+## Migrating existing 0.1.0 records
 
-Targets Foundry **14** and uses the native **ApplicationV2**, JournalEntry documents and FilePicker API. This is an initial implementation; it has not been tested live inside the user's installed Foundry client yet. The module is system-agnostic, with DnD5e 5.3.3 as its intended campaign environment.
+Version 0.1.0 placed entries in the native Journal directory under **GM Help | Secret Archive**. Version 0.2.0 **does not** modify those old entries automatically.
 
-Suggested next steps: richer relationship graph, integrated actor/scene importer, collapsible timelines, location maps, better rich-text editor, optional quick-access token context menu.
+1. Update GM Help to v0.2.0 and **fully reload** your Foundry client.
+2. Open GM Help via Module Settings.
+3. If old GM Help Journal entries exist, select **Import Old Records**. This copies them to the new independent archive, leaving originals untouched.
+4. Verify imported entries and click **Backup** to export a JSON copy.
+5. If desired, select **Cleanup Old Records**; this permanently deletes **only** matched legacy GM Help Journal entries after two explicit confirmations. Unmatched Journal records are never deleted.
+
+Do not manually delete legacy entries before migrating and exporting a backup.
+
+## Storage and access
+
+- New records are stored in the world-level gm-help.records setting as a JSON string, not JournalEntry documents.
+- Game masters can read and modify those records. The GM Help application and Module Settings launcher are restricted to GM.
+- Data survives module updates and can be restored via Import; deleting the setting manually destroys stored data.
+- JSON backups include **GM-only secrets**; store them privately.
+- There are no JournalDirectory render hooks, page-level CSS overrides, Monk's API calls or modifications of other modules.
+- This setting-based store is suitable for a moderate campaign encyclopedia. Very large libraries may require a dedicated pack or storage design in a later release.
+
+## Compatibility and limitations
+
+Foundry VTT **v14** / DnD5e **5.3.3** target. Script syntax, storage CRUD, isolated ApplicationV2 inheritance and rendering logic have been checked in a simulated environment; the update still needs live verification inside your installed Foundry world with Monk's enabled.
 
 Repository: https://github.com/Daikaze/Gm-Help

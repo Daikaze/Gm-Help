@@ -1,8 +1,8 @@
 {
   "id": "gm-help",
   "title": "GM Help",
-  "description": "Private Game Master encyclopedia for NPCs, cities, factions, quests, events and world lore, with search, artwork and optional Averis starter content.",
-  "version": "0.1.0",
+  "description": "Private GM encyclopedia. v0.2 fixes Foundry and Monk's UI conflicts, isolates CSS and archives data separately from Journals.",
+  "version": "0.2.0",
   "authors": [
     {
       "name": "Daikaze"
